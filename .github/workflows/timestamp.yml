@@ -32,7 +32,7 @@ jobs:
       - name: Refresh checksums and stamp if changed
         run: |
           git ls-files | grep -v -E '^(SHA256SUMS|SHA256SUMS\.ots|timestamps/)' | sort | xargs sha256sum > SHA256SUMS.new
-          if ! cmp -s SHA256SUMS.new SHA256SUMS; then
+          if ! cmp -s SHA256SUMS.new SHA256SUMS || [ ! -e SHA256SUMS.ots ]; then
             mv SHA256SUMS.new SHA256SUMS
             mkdir -p timestamps
             stamp="timestamps/SHA256SUMS-$(date -u +%Y%m%dT%H%M%SZ)"
