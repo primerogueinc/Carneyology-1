@@ -1,0 +1,55 @@
+name: Bitcoin timestamp
+
+# Hashes every tracked file into SHA256SUMS and anchors it in the Bitcoin
+# blockchain via OpenTimestamps (free). Runs on each push to main.
+# Proofs start "pending" and become fully verifiable after a few hours,
+# once the calendar servers commit to a Bitcoin block; the upgrade job
+# below completes them on later runs.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "SHA256SUMS"
+      - "SHA256SUMS.ots"
+      - "timestamps/**"
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install opentimestamps-client
+      - name: Refresh checksums and stamp if changed
+        run: |
+          git ls-files | grep -v -E '^(SHA256SUMS|SHA256SUMS\.ots|timestamps/)' | sort | xargs sha256sum > SHA256SUMS.new
+          if ! cmp -s SHA256SUMS.new SHA256SUMS; then
+            mv SHA256SUMS.new SHA256SUMS
+            mkdir -p timestamps
+            stamp="timestamps/SHA256SUMS-$(date -u +%Y%m%dT%H%M%SZ)"
+            cp SHA256SUMS "$stamp"
+            ots stamp "$stamp"
+            cp "$stamp.ots" SHA256SUMS.ots
+          else
+            rm SHA256SUMS.new
+          fi
+      - name: Upgrade pending proofs
+        run: |
+          for f in timestamps/*.ots; do [ -e "$f" ] && ots upgrade "$f" || true; done
+          latest=$(ls timestamps/*.ots 2>/dev/null | sort | tail -1)
+          [ -n "$latest" ] && cp "$latest" SHA256SUMS.ots || true
+      - name: Commit
+        run: |
+          git config user.name "timestamp-bot"
+          git config user.email "timestamp-bot@users.noreply.github.com"
+          git add SHA256SUMS SHA256SUMS.ots timestamps 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "Update checksums and Bitcoin timestamps" && git push)
